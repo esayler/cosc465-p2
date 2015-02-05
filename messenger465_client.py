@@ -21,27 +21,88 @@ class MessageBoardNetwork(object):
     It should make GET requests and POST requests (via the
     respective methods, below) and return the message or
     response data back to the MessageBoardController class.
+
+    host --> ip address of messageboard server
+    port --> UDP port that server is listening to
     '''
     def __init__(self, host, port):
         '''
         Constructor.  You should create a new socket
         here and do any other initialization.
         '''
+        self.host = host
+        self.port = port
+        try:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
+        except Exception as e:
+            print("1: Got exception type: ", type(e))
+            print(str(e))
         pass
 
     def getMessages(self):
         '''
-        You should make calls to get messages from the message 
+        You should make calls to get messages from the message
         board server here.
         '''
-        pass
+        request = "AGET"
+        request = request.encode()
+        msg_list = []
+        try:
+            self.sock.sendto(request, (self.host, self.port))
+
+            rv = select([self.sock], [], [], 0.1)
+            if len(rv[0]) == 0:
+                raise OSError("No messages available!")
+            (msg_data, server_address) = self.sock.recvfrom(1400)
+            #print("getMessages - recvfrom: " +  msg_data.decode())
+            msg_data_decoded = msg_data.decode()
+
+            if msg_data_decoded.startswith("AOK "):
+                msg_list = msg_data_decoded[4:].split("::") #used slicing to skip "AOK "
+                #print('OK')
+            elif msg_data_decoded.startswith("ERROR"):
+                #print(msg_data_decoded)
+                print("ERROR")
+
+            list_of_strings = []
+            for i in range(0, len(msg_list)-2, 3):
+                #print(msg_list[i:i+3])
+                list_of_strings.append(" ".join(msg_list[i:i+3]))
+                #newstring = " ".join(msg_list[i:3]))
+
+            return list_of_strings
+
+            #for j in list_of_strings:
+                #print(j)
+                ##for i in range(len(msg_data)): #pass
+        except Exception as e:
+            print("2. Got exception type: ", type(e))
+            print(str(e))
+
+        #msg_data = msg_data.decode('utf8')
 
     def postMessage(self, user, message):
         '''
-        You should make calls to post messages to the message 
+        You should make calls to post messages to the message
         board server here.
         '''
-        pass
+
+        #TODO: username can't be more than 8 characters
+        #TODO: "::" Can't appear in username or message
+        #TODO: message can't be more than 60 characters
+        message = "APOST " + user + "::" + message
+        message = message.encode()
+        rv = False
+        try:
+            self.sock.sendto(message, (self.host, self.port))
+            select([self.sock], [], [], 0.1)
+
+        except Exception as e:
+            print("3. Got exception type: ", type(e))
+            print(str(e))
+            rv = False
+
+        return rv
 
 
 class MessageBoardController(object):
@@ -68,28 +129,39 @@ class MessageBoardController(object):
         the message to the MessageBoardNetwork class via the
         postMessage method.
         '''
-        pass
+        if (self.net.postMessage(self.name, m)):
+            self.view.setStatus("Message Sent!")
+        else:
+            self.view.setStatus("Error!")
+            #TODO: update the GUI status bar to show whether operation was successful
+        #pass
 
     def retrieve_messages(self):
         '''
         This method gets called every second for retrieving
         messages from the server.  It calls the MessageBoardNetwork
         method getMessages() to do the "hard" work of retrieving
-        the messages from the server, then it should call 
+        the messages from the server, then it should call
         methods in MessageBoardView to display them in the GUI.
 
         You'll need to parse the response data from the server
         and figure out what should be displayed.
 
         Two relevant methods are (1) self.view.setListItems, which
-        takes a list of strings as input, and displays that 
+        takes a list of strings as input, and displays that
         list of strings in the GUI, and (2) self.view.setStatus,
         which can be used to display any useful status information
         at the bottom of the GUI.
         '''
         self.view.after(1000, self.retrieve_messages)
-        messagedata = self.net.getMessages()
-
+        try:
+            msg_data = self.net.getMessages()
+            self.view.setListItems(msg_data)
+        except OSError as e:
+            msg_data = []
+            #if len(msg_data) != 0:
+        ##TODO: Call view methods to display the messages, if error update status bar
+                #for i in msg_data:
 
 class MessageBoardView(tkinter.Frame):
     '''
@@ -126,7 +198,7 @@ class MessageBoardView(tkinter.Frame):
 
     def setMessageCallback(self, messagefn):
         '''
-        Set up the callback function when a message is generated 
+        Set up the callback function when a message is generated
         from the GUI.
         '''
         self.message_callback = messagefn
@@ -139,11 +211,11 @@ class MessageBoardView(tkinter.Frame):
         '''
         self.message_list.delete(0, self.message_list.size())
         self.message_list.insert(0, *mlist)
-        
+
     def newMessage(self, evt):
         '''Called when user hits entry in message window.  Send message
         to controller, and clear out the entry'''
-        message = self.entry.get()  
+        message = self.entry.get()
         if len(message):
             self.message_callback(message)
         self.entry.delete(0, len(self.entry.get()))
