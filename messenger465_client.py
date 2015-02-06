@@ -32,77 +32,81 @@ class MessageBoardNetwork(object):
         '''
         self.host = host
         self.port = port
+
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
         except Exception as e:
             print("1: Got exception type: ", type(e))
             print(str(e))
-        pass
 
     def getMessages(self):
         '''
         You should make calls to get messages from the message
         board server here.
         '''
-        request = "AGET"
-        request = request.encode()
+        get_request = "AGET"
+        get_request = get_request.encode()
         msg_list = []
+
         try:
-            self.sock.sendto(request, (self.host, self.port))
+            self.sock.sendto(get_request, (self.host, self.port))
 
             rv = select([self.sock], [], [], 0.1)
             if len(rv[0]) == 0:
                 raise OSError("No messages available!")
+
             (msg_data, server_address) = self.sock.recvfrom(1400)
-            #print("getMessages - recvfrom: " +  msg_data.decode())
-            msg_data_decoded = msg_data.decode()
 
-            if msg_data_decoded.startswith("AOK "):
-                msg_list = msg_data_decoded[4:].split("::") #used slicing to skip "AOK "
-                #print('OK')
-            elif msg_data_decoded.startswith("ERROR"):
-                #print(msg_data_decoded)
-                print("ERROR")
+            msg_data = msg_data.decode()
 
-            list_of_strings = []
+            if msg_data.startswith("AOK"):
+                msg_list = msg_data[4:].split("::")
+            elif msg_data.startswith("AERROR"):
+                raise IOError(msg_data)
+
+            message_strings = []
             for i in range(0, len(msg_list)-2, 3):
-                #print(msg_list[i:i+3])
-                list_of_strings.append(" ".join(msg_list[i:i+3]))
-                #newstring = " ".join(msg_list[i:3]))
+                message_strings.append(" ".join(msg_list[i:i+3]))
 
-            return list_of_strings
+            return message_strings
 
-            #for j in list_of_strings:
-                #print(j)
-                ##for i in range(len(msg_data)): #pass
         except Exception as e:
             print("2. Got exception type: ", type(e))
             print(str(e))
-
-        #msg_data = msg_data.decode('utf8')
 
     def postMessage(self, user, message):
         '''
         You should make calls to post messages to the message
         board server here.
         '''
-
         #TODO: username can't be more than 8 characters
         #TODO: "::" Can't appear in username or message
         #TODO: message can't be more than 60 characters
-        message = "APOST " + user + "::" + message
-        message = message.encode()
-        rv = False
-        try:
-            self.sock.sendto(message, (self.host, self.port))
-            select([self.sock], [], [], 0.1)
 
+        if len(user) > 8:
+            return False
+        elif "::" in user:
+            return False
+        elif len(message) > 60:
+            return False
+        elif "::" in message:
+            print("You've got a double colon")
+            return False
+
+        post_request = "APOST " + user + "::" + message
+        post_request = post_request.encode()
+        sent = False
+
+        try:
+            self.sock.sendto(post_request, (self.host, self.port))
+            select([self.sock], [], [], 0.1)
+            sent = True
         except Exception as e:
             print("3. Got exception type: ", type(e))
             print(str(e))
-            rv = False
+            sent = False
 
-        return rv
+        return sent
 
 
 class MessageBoardController(object):
@@ -129,12 +133,10 @@ class MessageBoardController(object):
         the message to the MessageBoardNetwork class via the
         postMessage method.
         '''
-        if (self.net.postMessage(self.name, m)):
+        if self.net.postMessage(self.name, m):
             self.view.setStatus("Message Sent!")
         else:
             self.view.setStatus("Error!")
-            #TODO: update the GUI status bar to show whether operation was successful
-        #pass
 
     def retrieve_messages(self):
         '''
@@ -155,13 +157,17 @@ class MessageBoardController(object):
         '''
         self.view.after(1000, self.retrieve_messages)
         try:
-            msg_data = self.net.getMessages()
-            self.view.setListItems(msg_data)
+            display_strings = self.net.getMessages()
+            if display_strings != None:
+                self.view.setListItems(display_strings)
+
+                if len(display_strings) != 0:
+                    self.view.setStatus("Retrieved {} messages".format(len(display_strings)))
+                else:
+                    self.view.setStatus("")
         except OSError as e:
-            msg_data = []
-            #if len(msg_data) != 0:
-        ##TODO: Call view methods to display the messages, if error update status bar
-                #for i in msg_data:
+            self.view.setStatus("Error!")
+            print(type(e), str(e))
 
 class MessageBoardView(tkinter.Frame):
     '''
@@ -241,8 +247,10 @@ if __name__ == '__main__':
                         help='Set the port number for the server (default: 1111)')
     args = parser.parse_args()
 
-    myname = input("What is your user name (max 8 characters)? ")
 
+    myname = input("What is your user name (max 8 characters)? ")
+    if "::" in myname:
+        raise Exception("Your name is bad!")
     app = MessageBoardController(myname, args.host, args.port)
     app.run()
 
