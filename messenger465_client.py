@@ -79,34 +79,30 @@ class MessageBoardNetwork(object):
         You should make calls to post messages to the message
         board server here.
         '''
-        #TODO: username can't be more than 8 characters
-        #TODO: "::" Can't appear in username or message
-        #TODO: message can't be more than 60 characters
 
-        if len(user) > 8:
-            return False
-        elif "::" in user:
-            return False
-        elif len(message) > 60:
-            return False
+        if len(message) > 60:
+            #return False
+            return "Message too long! (Max length 60 characters)"
         elif "::" in message:
-            print("You've got a double colon")
-            return False
+            return "Message invalid! Contains '::'"
+            #print("You've got a double colon")
+            #return False
 
         post_request = "APOST " + user + "::" + message
         post_request = post_request.encode()
-        sent = False
+
+        status_string = ""
 
         try:
             self.sock.sendto(post_request, (self.host, self.port))
             select([self.sock], [], [], 0.1)
-            sent = True
+            status_string = "Sent!"
         except Exception as e:
             print("3. Got exception type: ", type(e))
             print(str(e))
-            sent = False
+            status_string = "Error!"
 
-        return sent
+        return status_string
 
 
 class MessageBoardController(object):
@@ -133,10 +129,8 @@ class MessageBoardController(object):
         the message to the MessageBoardNetwork class via the
         postMessage method.
         '''
-        if self.net.postMessage(self.name, m):
-            self.view.setStatus("Message Sent!")
-        else:
-            self.view.setStatus("Error!")
+
+        self.view.setStatus(self.net.postMessage(self.name, m))
 
     def retrieve_messages(self):
         '''
@@ -161,10 +155,10 @@ class MessageBoardController(object):
             if display_strings != None:
                 self.view.setListItems(display_strings)
 
-                if len(display_strings) != 0:
-                    self.view.setStatus("Retrieved {} messages".format(len(display_strings)))
-                else:
-                    self.view.setStatus("")
+                #if len(display_strings) != 0:
+                    #self.view.setStatus("Retrieved {} messages".format(len(display_strings)))
+                #else:
+                    #self.view.setStatus("")
         except OSError as e:
             self.view.setStatus("Error!")
             print(type(e), str(e))
@@ -247,10 +241,16 @@ if __name__ == '__main__':
                         help='Set the port number for the server (default: 1111)')
     args = parser.parse_args()
 
+    user_name_invalid  = True
+    while user_name_invalid:
+        myname = input("What is your user name (max 8 characters)? ")
+        if "::" in myname:
+            print("Username invalid, contains '::'")
+        elif len(myname) > 8:
+            print("Username too long!")
+        else:
+            user_name_invalid = False
 
-    myname = input("What is your user name (max 8 characters)? ")
-    if "::" in myname:
-        raise Exception("Your name is bad!")
     app = MessageBoardController(myname, args.host, args.port)
     app.run()
 
