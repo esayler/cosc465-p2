@@ -14,7 +14,7 @@ import socket
 from select import select
 import argparse
 
-status_timeout = 1
+status_timeout = 0
 
 class MessageBoardNetwork(object):
 
@@ -35,7 +35,6 @@ class MessageBoardNetwork(object):
         '''
         self.host = host
         self.port = port
-        print("inside constructor")
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
         except Exception as e:
@@ -130,7 +129,7 @@ class MessageBoardController(object):
         postMessage method.
         '''
         global status_timeout
-        status_timeout = 1
+        status_timeout = 0
         self.view.setStatus(self.net.postMessage(self.name, m))
 
     def retrieve_messages(self):
@@ -151,9 +150,7 @@ class MessageBoardController(object):
         at the bottom of the GUI.
         '''
         global status_timeout
-        print("before" + str(status_timeout))
         status_timeout = (status_timeout + 1) % 5
-        print("after" + str(status_timeout))
 
         if status_timeout % 5 == 0:
             self.view.setStatus("")
