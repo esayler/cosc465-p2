@@ -16,6 +16,29 @@ import argparse
 
 status_timeout = 0
 
+class AppError(Exception):
+    """Base class for errors in the message board/chat client application"""
+    pass
+
+class ServerError(AppError):
+    pass
+
+class InvalidString(AppError):
+    """Base class for invalid string errors"""
+    pass
+
+class RequestError(ServerError):
+    """class for request errors in the app"""
+    pass
+
+class PostError(RequestError):
+    """class for post errors"""
+    pass
+
+class GetError(RequestError):
+    """class for post error"""
+    pass
+
 class MessageBoardNetwork(object):
 
     '''
@@ -37,7 +60,7 @@ class MessageBoardNetwork(object):
         self.port = port
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
-        except Exception as e:
+        except socket.error as e:
             print("Got exception type: ", type(e))
             print(str(e))
 
@@ -46,35 +69,19 @@ class MessageBoardNetwork(object):
         You should make calls to get messages from the message
         board server here.
         '''
-        get_request = "AGET"
-        get_request = get_request.encode()
-        msg_list = []
 
-        try:
-            self.sock.sendto(get_request, (self.host, self.port))
+        msg_data = self.makeRequest(0, "", "")
 
-            rv = select([self.sock], [], [], 0.1)
-            if len(rv[0]) == 0:
-                raise OSError("No messages available!")
+        if msg_data.startswith("AOK"):
+            msg_list = msg_data[4:].split("::")
+        elif msg_data.startswith("AERROR"):
+            raise GetError(msg_data)
 
-            (msg_data, server_address) = self.sock.recvfrom(1400)
+        message_strings = []
+        for i in range(0, len(msg_list)-2, 3):
+             message_strings.append(" ".join(msg_list[i:i+3]))
 
-            msg_data = msg_data.decode()
-
-            if msg_data.startswith("AOK"):
-                msg_list = msg_data[4:].split("::")
-            elif msg_data.startswith("AERROR"):
-                raise IOError(msg_data)
-
-            message_strings = []
-            for i in range(0, len(msg_list)-2, 3):
-                message_strings.append(" ".join(msg_list[i:i+3]))
-
-            return message_strings
-
-        except Exception as e:
-            print("Got exception type: ", type(e))
-            print(str(e))
+        return message_strings
 
     def postMessage(self, user, message):
         '''
@@ -82,27 +89,63 @@ class MessageBoardNetwork(object):
         board server here.
         '''
 
-        if len(message) > 60:
-            return "Message too long! (Max length 60 characters)"
-        elif "::" in message:
-            return "Message invalid! Contains '::'"
+        msg_data = self.makeRequest(1, user, message)
 
-        post_request = "APOST " + user + "::" + message
-        post_request = post_request.encode()
+        if msg_data.startswith("AOK"):
+            status_string = "Message Sent!"
+        elif msg_data.startswith("AERROR"):
+            if len(message) > 60:
+                status_string = "Message too long! (Max length 60 characters)"
+            elif "::" in message:
+                status_string = "Message invalid! Contains '::'"
+            elif "::" in user:
+                status_string = "Username invalid! Contains '::'"
 
-        status_string = ""
-
-        try:
-            self.sock.sendto(post_request, (self.host, self.port))
-            select([self.sock], [], [], 0.1)
-            status_string = "Sent!"
-        except Exception as e:
-            print("Got exception type: ", type(e))
-            print(str(e))
-            status_string = "Error!"
+        else:
+            raise PostError("invalid reponse received from server!")
 
         return status_string
 
+    def makeRequest(self, request_type, user, message):
+        '''
+        Used to make GET and POST actions.
+        Returns the server's reponse string.
+        For GET actions, request_type is 0;
+        user and message are passed as empty strings.
+        For POST actions, request_type is 1;
+        username and message are provided as args.
+        '''
+
+        if request_type == 0:
+            request = "AGET".encode()
+        elif request_type == 1:
+            request = "APOST " + user + "::" + message
+            request = request.encode()
+        else:
+            raise AppError("unsupported request type:")
+
+        try:
+            self.sock.sendto(request, (self.host, self.port))
+
+        except socket.error as e:
+            print("Got exception type: ", type(e))
+            print(str(e))
+
+        try:
+            rv = select([self.sock], [], [], 0.1)
+            if len(rv[0]) == 0:
+                raise ServerError("Server Timeout: No messages available!")
+
+        except Exception as e:
+            print("Got exception type: ", type(e))
+            print(str(e))
+
+        try:
+            (msg_data, server_address) = self.sock.recvfrom(1400)
+            return msg_data.decode()
+        except socket.error as e:
+            print("Got exception type: ", type(e))
+            print(str(e))
 
 class MessageBoardController(object):
     '''
@@ -247,16 +290,17 @@ if __name__ == '__main__':
                         help='Set the port number for the server (default: 1111)')
     args = parser.parse_args()
 
-    user_name_invalid  = True
-    while user_name_invalid:
-        myname = input("What is your user name (max 8 characters)? ")
-        if "::" in myname:
-            print("Username invalid, contains '::'")
-        elif len(myname) > 8:
-            print("Username too long!")
-        else:
-            user_name_invalid = False
+    #user_name_invalid  = True
+    #while user_name_invalid:
+        #myname = input("What is your user name (max 8 characters)? ")
+        #if "::" in myname:
+            #print("Username invalid, contains '::'")
+        #elif len(myname) > 8:
+            #print("Username too long!")
+        #else:
+            #user_name_invalid = False
 
+    myname = input("What is your user name (max 8 characters)? ")
     app = MessageBoardController(myname, args.host, args.port)
     app.run()
 
