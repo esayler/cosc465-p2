@@ -14,7 +14,10 @@ import socket
 from select import select
 import argparse
 
+status_timeout = 1
+
 class MessageBoardNetwork(object):
+
     '''
     Model class in the MVC pattern.  This class handles
     the low-level network interactions with the server.
@@ -32,11 +35,11 @@ class MessageBoardNetwork(object):
         '''
         self.host = host
         self.port = port
-
+        print("inside constructor")
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
         except Exception as e:
-            print("1: Got exception type: ", type(e))
+            print("Got exception type: ", type(e))
             print(str(e))
 
     def getMessages(self):
@@ -71,7 +74,7 @@ class MessageBoardNetwork(object):
             return message_strings
 
         except Exception as e:
-            print("2. Got exception type: ", type(e))
+            print("Got exception type: ", type(e))
             print(str(e))
 
     def postMessage(self, user, message):
@@ -81,12 +84,9 @@ class MessageBoardNetwork(object):
         '''
 
         if len(message) > 60:
-            #return False
             return "Message too long! (Max length 60 characters)"
         elif "::" in message:
             return "Message invalid! Contains '::'"
-            #print("You've got a double colon")
-            #return False
 
         post_request = "APOST " + user + "::" + message
         post_request = post_request.encode()
@@ -98,7 +98,7 @@ class MessageBoardNetwork(object):
             select([self.sock], [], [], 0.1)
             status_string = "Sent!"
         except Exception as e:
-            print("3. Got exception type: ", type(e))
+            print("Got exception type: ", type(e))
             print(str(e))
             status_string = "Error!"
 
@@ -129,7 +129,8 @@ class MessageBoardController(object):
         the message to the MessageBoardNetwork class via the
         postMessage method.
         '''
-
+        global status_timeout
+        status_timeout = 1
         self.view.setStatus(self.net.postMessage(self.name, m))
 
     def retrieve_messages(self):
@@ -149,10 +150,18 @@ class MessageBoardController(object):
         which can be used to display any useful status information
         at the bottom of the GUI.
         '''
+        global status_timeout
+        print("before" + str(status_timeout))
+        status_timeout = (status_timeout + 1) % 5
+        print("after" + str(status_timeout))
+
+        if status_timeout % 5 == 0:
+            self.view.setStatus("")
+
         self.view.after(1000, self.retrieve_messages)
         try:
             display_strings = self.net.getMessages()
-            if display_strings != None:
+            if len(display_strings) > 0:
                 self.view.setListItems(display_strings)
 
                 #if len(display_strings) != 0:
