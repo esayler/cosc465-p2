@@ -51,13 +51,16 @@ class MessageBoardNetwork(object):
     host --> ip address of messageboard server
     port --> UDP port that server is listening to
     '''
-    def __init__(self, host, port):
+    def __init__(self, host, port, retries, timeout):
         '''
         Constructor.  You should create a new socket
         here and do any other initialization.
         '''
         self.host = host
         self.port = port
+        self.sequence_char = '0'
+        self.retries = retries
+        self.timeout = timeout
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
         except socket.error as e:
@@ -70,14 +73,19 @@ class MessageBoardNetwork(object):
         board server here.
         '''
 
-        msg_data = self.makeRequest(0, "", "")
-
-        if msg_data.startswith("AOK"):
-            msg_list = msg_data[4:].split("::")
-        elif msg_data.startswith("AERROR"):
-            raise GetError(msg_data)
-
         message_strings = []
+        msg_list = []
+        ack = self.makeRequest(0, "", "")
+
+        if ack == "FAIL":
+            raise GetError("Server Never responded!")
+        elif "OK" in ack:
+            msg_list = ack[4:].split("::")
+        elif "ERROR" in ack:
+            raise GetError(ack)
+        else:
+            raise GetError("invalid response received from server!")
+
         for i in range(0, len(msg_list)-2, 3):
              message_strings.append(" ".join(msg_list[i:i+3]))
 
@@ -88,21 +96,20 @@ class MessageBoardNetwork(object):
         You should make calls to post messages to the message
         board server here.
         '''
-
-        msg_data = self.makeRequest(1, user, message)
-
-        if msg_data.startswith("AOK"):
+        ack = self.makeRequest(1, user, message)
+        if ack == "FAIL":
+            raise PostError("Server never responded!")
+        elif "OK" in ack:
             status_string = "Message Sent!"
-        elif msg_data.startswith("AERROR"):
+        elif "ERROR" in ack:
             if len(message) > 60:
                 status_string = "Message too long! (Max length 60 characters)"
             elif "::" in message:
                 status_string = "Message invalid! Contains '::'"
             elif "::" in user:
                 status_string = "Username invalid! Contains '::'"
-
         else:
-            raise PostError("invalid reponse received from server!")
+            raise PostError("invalid response received from server!")
 
         return status_string
 
@@ -117,35 +124,46 @@ class MessageBoardNetwork(object):
         '''
 
         if request_type == 0:
-            request = "AGET".encode()
+            data = "GET"
         elif request_type == 1:
-            request = "APOST " + user + "::" + message
-            request = request.encode()
+            data = "POST " + user + "::" + message
         else:
             raise AppError("unsupported request type:")
 
-        try:
-            self.sock.sendto(request, (self.host, self.port))
+        message_in_bytes = bytearray(data, 'ascii')
+        checksum = 0
+        for b in message_in_bytes:
+            checksum ^= b
 
-        except socket.error as e:
-            print("Got exception type: ", type(e))
-            print(str(e))
+        print("checksum: " + str(checksum))
 
-        try:
-            rv = select([self.sock], [], [], 0.1)
-            if len(rv[0]) == 0:
-                raise ServerError("Server Timeout: No messages available!")
+        header = 'C' + self.sequence_char + chr(checksum)
+        message = header + data
+        request = message.encode()
 
-        except Exception as e:
-            print("Got exception type: ", type(e))
-            print(str(e))
+        attempts = 0
+        while attempts <= self.retries:
+            try:
+                self.sock.sendto(request, (self.host, self.port))
+                read_list = select([self.sock], [], [], self.timeout)
+                if len(read_list[0]) != 0:
+                    (ack, server_address) = self.sock.recvfrom(1400)
+                    received_seq = ack.decode()[1]
+                    if received_seq == self.sequence_char:
+                        if self.sequence_char == '0':
+                            self.sequence_char = '1'
+                        else:
+                            self.sequence_char = '0'
+                        return ack.decode()
+                    else:
+                        attempts += 1
+                else:
+                    attempts += 1
+            except socket.error as e:
+                print("Got exception type: ", type(e))
+                print(str(e))
 
-        try:
-            (msg_data, server_address) = self.sock.recvfrom(1400)
-            return msg_data.decode()
-        except socket.error as e:
-            print("Got exception type: ", type(e))
-            print(str(e))
+        return "FAIL"
 
 class MessageBoardController(object):
     '''
@@ -154,11 +172,11 @@ class MessageBoardController(object):
     to/from the server via the MessageBoardNetwork class.
     '''
 
-    def __init__(self, myname, host, port):
+    def __init__(self, myname, host, port, retries, timeout):
         self.name = myname
         self.view = MessageBoardView(myname)
         self.view.setMessageCallback(self.post_message_callback)
-        self.net = MessageBoardNetwork(host, port)
+        self.net = MessageBoardNetwork(host, port, retries, timeout)
 
     def run(self):
         self.view.after(1000, self.retrieve_messages)
@@ -288,6 +306,10 @@ if __name__ == '__main__':
                         help='Set the host name for server to send requests to (default: localhost)')
     parser.add_argument('--port', dest='port', type=int, default=1111,
                         help='Set the port number for the server (default: 1111)')
+    parser.add_argument("--retries", dest='retries', type=int, default=3,
+                        help='Set the number of retransmissions in case of a timeout')
+    parser.add_argument("--timeout", dest='timeout', type=float, default=0.1,
+                        help='Set the RTO value')
     args = parser.parse_args()
 
     #user_name_invalid  = True
@@ -301,6 +323,7 @@ if __name__ == '__main__':
             #user_name_invalid = False
 
     myname = input("What is your user name (max 8 characters)? ")
-    app = MessageBoardController(myname, args.host, args.port)
+    app = MessageBoardController(myname, args.host, args.port,
+                                 args.retries, args.timeout)
     app.run()
 
