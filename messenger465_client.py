@@ -17,26 +17,26 @@ import argparse
 status_timeout = 0
 
 class AppError(Exception):
-    """Base class for errors in the message board/chat client application"""
+    ''''Base exception class for errors in the client application'''
+    pass
+
+class DataError(AppError):
+    '''class for data corruption errors (checksum)'''
     pass
 
 class ServerError(AppError):
     pass
 
-class InvalidString(AppError):
-    """Base class for invalid string errors"""
-    pass
-
-class RequestError(ServerError):
-    """class for request errors in the app"""
+class RequestError(AppError):
+    '''class for request errors'''
     pass
 
 class PostError(RequestError):
-    """class for post errors"""
+    ''''class for post errors'''
     pass
 
 class GetError(RequestError):
-    """class for post error"""
+    ''''class for post errors'''
     pass
 
 class MessageBoardNetwork(object):
@@ -67,6 +67,17 @@ class MessageBoardNetwork(object):
             print("Got exception type: ", type(e))
             print(str(e))
 
+    @staticmethod
+    def lrc(data_string):
+        '''
+        takes a string a returns a XOR checksum in integer form
+        '''
+        message_in_bytes = bytearray(data_string, 'ascii')
+        checksum = 0
+        for b in message_in_bytes:
+            checksum ^= b
+        return checksum
+
     def getMessages(self):
         '''
         You should make calls to get messages from the message
@@ -76,12 +87,13 @@ class MessageBoardNetwork(object):
         message_strings = []
         msg_list = []
         ack = self.makeRequest(0, "", "")
-
         if ack == "FAIL":
             raise GetError("Server Never responded!")
+        #elif "OK" == ack[3:5]:
         elif "OK" in ack:
-            msg_list = ack[4:].split("::")
+            msg_list = ack[6:].split("::")
         elif "ERROR" in ack:
+            #print(ack[3:8])
             raise GetError(ack)
         else:
             raise GetError("invalid response received from server!")
@@ -100,6 +112,7 @@ class MessageBoardNetwork(object):
         if ack == "FAIL":
             raise PostError("Server never responded!")
         elif "OK" in ack:
+            #print(ack[3:5])
             status_string = "Message Sent!"
         elif "ERROR" in ack:
             if len(message) > 60:
@@ -109,7 +122,7 @@ class MessageBoardNetwork(object):
             elif "::" in user:
                 status_string = "Username invalid! Contains '::'"
         else:
-            raise PostError("invalid response received from server!")
+            raise PostError("Invalid response received from server!")
 
         return status_string
 
@@ -128,42 +141,43 @@ class MessageBoardNetwork(object):
         elif request_type == 1:
             data = "POST " + user + "::" + message
         else:
-            raise AppError("unsupported request type:")
+            raise AppError("unsupported request type")
 
-        message_in_bytes = bytearray(data, 'ascii')
-        checksum = 0
-        for b in message_in_bytes:
-            checksum ^= b
-
-        print("checksum: " + str(checksum))
-
+        checksum = self.lrc(data)
         header = 'C' + self.sequence_char + chr(checksum)
         message = header + data
         request = message.encode()
 
         attempts = 0
         while attempts <= self.retries:
-            try:
-                self.sock.sendto(request, (self.host, self.port))
-                read_list = select([self.sock], [], [], self.timeout)
-                if len(read_list[0]) != 0:
-                    (ack, server_address) = self.sock.recvfrom(1400)
-                    received_seq = ack.decode()[1]
-                    if received_seq == self.sequence_char:
+            self.sock.sendto(request, (self.host, self.port))
+            read_list = select([self.sock], [], [], self.timeout)
+            if len(read_list[0]) != 0:
+                (ack, server_address) = self.sock.recvfrom(1400)
+                ack = ack.decode()
+                received_seq = ack[1]
+                if received_seq == self.sequence_char:
+                    received_checksum = ack[2]
+                    message = ack[3:]
+                    my_checksum = self.lrc(ack[3:])
+                    if chr(my_checksum) == received_checksum:
                         if self.sequence_char == '0':
                             self.sequence_char = '1'
                         else:
                             self.sequence_char = '0'
-                        return ack.decode()
+                        return ack
                     else:
+                        #raise DataError("Checksum didn't match!")
                         attempts += 1
                 else:
+                    #raise AppError("Sequence didn't match!")
                     attempts += 1
-            except socket.error as e:
-                print("Got exception type: ", type(e))
-                print(str(e))
+            else:
+                #raise ServerError("No response received! ")
+                attempts += 1
 
         return "FAIL"
+
 
 class MessageBoardController(object):
     '''
@@ -191,7 +205,20 @@ class MessageBoardController(object):
         '''
         global status_timeout
         status_timeout = 0
-        self.view.setStatus(self.net.postMessage(self.name, m))
+        try:
+            self.view.setStatus(self.net.postMessage(self.name, m))
+        except socket.error as e:
+            self.view.setStatus("Socket Error! "+ str(e))
+        except PostError as e:
+            self.view.setStatus("POST Error! " + str(e))
+        except ServerError as e:
+            self.view.setStatus("Server Error!" + str(e))
+        except UnicodeError as e:
+            self.view.setStatus("Error! Data corrupted!")
+        except Exception as e:
+            error_msg = "Error! {} {}".format(type(e), str(e))
+            print(error_msg)
+            self.view.setStatus(error_msg)
 
     def retrieve_messages(self):
         '''
@@ -221,14 +248,16 @@ class MessageBoardController(object):
             display_strings = self.net.getMessages()
             if len(display_strings) > 0:
                 self.view.setListItems(display_strings)
-
-                #if len(display_strings) != 0:
-                    #self.view.setStatus("Retrieved {} messages".format(len(display_strings)))
-                #else:
-                    #self.view.setStatus("")
-        except OSError as e:
-            self.view.setStatus("Error!")
-            print(type(e), str(e))
+        except socket.error as e:
+            self.view.setStatus("Socket Error! "+ str(e))
+        except GetError as e:
+            self.view.setStatus("GET Error! " + str(e))
+        except UnicodeError as e:
+            self.view.setStatus("Error! Data corrupted!")
+        except Exception as e:
+            error_msg = "Error! {} {}".format(type(e), str(e))
+            print(error_msg)
+            self.view.setStatus(error_msg)
 
 class MessageBoardView(tkinter.Frame):
     '''
@@ -325,5 +354,6 @@ if __name__ == '__main__':
     myname = input("What is your user name (max 8 characters)? ")
     app = MessageBoardController(myname, args.host, args.port,
                                  args.retries, args.timeout)
+    print("args.host: " + str(args.host) + " | args.port: " + str(args.port))
     app.run()
 
