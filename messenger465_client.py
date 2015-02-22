@@ -25,6 +25,7 @@ class DataError(AppError):
     pass
 
 class ServerError(AppError):
+    '''class for server reponse errors'''
     pass
 
 class RequestError(AppError):
@@ -40,7 +41,6 @@ class GetError(RequestError):
     pass
 
 class MessageBoardNetwork(object):
-
     '''
     Model class in the MVC pattern.  This class handles
     the low-level network interactions with the server.
@@ -83,17 +83,14 @@ class MessageBoardNetwork(object):
         You should make calls to get messages from the message
         board server here.
         '''
-
         message_strings = []
         msg_list = []
         ack = self.makeRequest(0, "", "")
         if ack == "FAIL":
             raise GetError("Server Never responded!")
-        #elif "OK" == ack[3:5]:
         elif "OK" in ack:
             msg_list = ack[6:].split("::")
         elif "ERROR" in ack:
-            #print(ack[3:8])
             raise GetError(ack)
         else:
             raise GetError("invalid response received from server!")
@@ -112,7 +109,6 @@ class MessageBoardNetwork(object):
         if ack == "FAIL":
             raise PostError("Server never responded!")
         elif "OK" in ack:
-            #print(ack[3:5])
             status_string = "Message Sent!"
         elif "ERROR" in ack:
             if len(message) > 60:
@@ -149,7 +145,7 @@ class MessageBoardNetwork(object):
         request = message.encode()
 
         attempts = 0
-        while attempts <= self.retries:
+        while attempts < self.retries:
             self.sock.sendto(request, (self.host, self.port))
             read_list = select([self.sock], [], [], self.timeout)
             if len(read_list[0]) != 0:
@@ -167,13 +163,10 @@ class MessageBoardNetwork(object):
                             self.sequence_char = '0'
                         return ack
                     else:
-                        #raise DataError("Checksum didn't match!")
                         attempts += 1
                 else:
-                    #raise AppError("Sequence didn't match!")
                     attempts += 1
             else:
-                #raise ServerError("No response received! ")
                 attempts += 1
 
         return "FAIL"
